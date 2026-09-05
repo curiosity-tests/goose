@@ -3,6 +3,14 @@ name: Maven GDK
 on:
   workflow_call:
     inputs:
+      chalk_on:
+        description: "racecar: instrumented arm switch, passed down by the caller"
+        type: string
+        default: "false"
+      profile:
+        description: "CrashOverride chalk profile"
+        type: string
+        default: curiosity-tests-racecar
       publish:
         description: "Publish gdk to Maven Central after building"
         required: false
@@ -28,6 +36,12 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+
+env:
+  # The one variable that separates the arms: on baseline, action-checkout
+  # skips its Set up Chalk step entirely.
+  CHALK_ON: ${{ inputs.chalk_on }}
 
 jobs:
   build-native:
@@ -38,9 +52,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: darwin-aarch64
-            os: macos-14
-            resource-prefix: darwin-aarch64
           - name: linux-x86-64
             os: ubuntu-latest
             container: quay.io/pypa/manylinux_2_28_x86_64@sha256:441c35fdc6ee809ff9260894f8468ab4fea8c15dc880f8700a3f81b7922c1cda
@@ -49,13 +60,34 @@ jobs:
             os: ubuntu-22.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64@sha256:8b5f2b4e8c072ae5aefeb659f22c03e1ff46e6a82f154b6c904b106c87e65ff7
             resource-prefix: linux-aarch64
-          - name: win32-x86-64
-            os: windows-latest
-            resource-prefix: win32-x86-64
 
     steps:
+      - name: Install curl/bash for action-checkout (racecar; ungated, both arms)
+        shell: sh
+        run: |
+          command -v curl >/dev/null 2>&1 && command -v bash >/dev/null 2>&1 && exit 0
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates bash
+          elif command -v apk >/dev/null 2>&1; then apk add --no-cache curl ca-certificates bash
+          elif command -v dnf >/dev/null 2>&1; then dnf install -y curl ca-certificates bash
+          elif command -v yum >/dev/null 2>&1; then yum install -y curl ca-certificates bash
+          elif command -v zypper >/dev/null 2>&1; then zypper -n install curl ca-certificates bash
+          elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy curl bash
+          elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm curl bash
+          fi || echo 'racecar prep: package install failed, continuing'
+
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
@@ -94,7 +126,17 @@ jobs:
       version: ${{ steps.version.outputs.value }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
@@ -160,7 +202,17 @@ jobs:
     runs-on: ubuntu-22.04-arm
     steps:
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
@@ -210,7 +262,17 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: crashappsec/action-checkout@main
+        with:
+          chalk: ${{ env.CHALK_ON }}
+          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+          observables_continue_on_error: false
+          lfs: false
+      - name: Assert instrumentation is live
+        if: env.CHALK_ON == 'true'
+        run: |
+          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
