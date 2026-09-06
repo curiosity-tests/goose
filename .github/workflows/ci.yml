@@ -33,7 +33,7 @@ permissions:
 env:
   # The one variable that separates the arms: on baseline, action-checkout
   # skips its Set up Chalk step entirely.
-  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+  CHALK_ON: ${{ inputs.leg == 'instrumented' }}
 
 run-name: "CI ${{ inputs.leg || 'push' }} ${{ inputs.racecar_run }}"
 
@@ -71,7 +71,7 @@ jobs:
     name: goose ACP npm packages
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout Code
         uses: crashappsec/action-checkout@main
@@ -115,7 +115,7 @@ jobs:
     name: Check Rust Code Format
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout Code
         uses: crashappsec/action-checkout@main
@@ -141,7 +141,7 @@ jobs:
     name: Build and Test Rust Project
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout Code
         uses: crashappsec/action-checkout@main
@@ -180,7 +180,7 @@ jobs:
     name: Check goose-sdk UniFFI
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout Code
         uses: crashappsec/action-checkout@main
@@ -213,13 +213,13 @@ jobs:
   kotlin-gdk-smoke-test:
     name: Test Kotlin GDK package
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/maven-sdk.yml
     with:
-      chalk_on: ${{ (github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline') && 'true' || 'false' }}
+      chalk_on: ${{ inputs.leg == 'instrumented' && 'true' || 'false' }}
       profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
       publish: false
       smoke-test: true
@@ -228,7 +228,7 @@ jobs:
     name: Build and Test TLS Backend (${{ matrix.tls-feature }})
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -277,7 +277,7 @@ jobs:
     name: Build and Test Roaming Feature
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout Code
         uses: crashappsec/action-checkout@main
@@ -318,7 +318,7 @@ jobs:
     name: Check MSRV
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout code
         uses: crashappsec/action-checkout@main
@@ -365,7 +365,7 @@ jobs:
     name: Lint Rust Code
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout code
         uses: crashappsec/action-checkout@main
@@ -398,7 +398,7 @@ jobs:
     name: Check Generated Schemas are Up-to-Date
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     steps:
       - name: Checkout Code
         uses: crashappsec/action-checkout@main
@@ -480,7 +480,7 @@ jobs:
     name: Test Desktop Updater Install (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.code == 'true' || github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' || 'push' != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
