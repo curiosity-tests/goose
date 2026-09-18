@@ -52,72 +52,143 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-x86-64
-            os: ubuntu-latest
-            container: quay.io/pypa/manylinux_2_28_x86_64@sha256:441c35fdc6ee809ff9260894f8468ab4fea8c15dc880f8700a3f81b7922c1cda
-            resource-prefix: linux-x86-64
-          - name: linux-aarch64
-            os: ubuntu-22.04-arm
-            container: quay.io/pypa/manylinux_2_28_aarch64@sha256:8b5f2b4e8c072ae5aefeb659f22c03e1ff46e6a82f154b6c904b106c87e65ff7
-            resource-prefix: linux-aarch64
+        - name: linux-x86-64
+          os: ubuntu-latest
+          container: quay.io/pypa/manylinux_2_28_x86_64@sha256:441c35fdc6ee809ff9260894f8468ab4fea8c15dc880f8700a3f81b7922c1cda
+          resource-prefix: linux-x86-64
+        - name: linux-aarch64
+          os: ubuntu-22.04-arm
+          container: quay.io/pypa/manylinux_2_28_aarch64@sha256:8b5f2b4e8c072ae5aefeb659f22c03e1ff46e6a82f154b6c904b106c87e65ff7
+          resource-prefix: linux-aarch64
 
     steps:
-      - name: Install curl/bash for action-checkout (racecar; ungated, both arms)
-        shell: sh
-        run: |
-          command -v curl >/dev/null 2>&1 && command -v bash >/dev/null 2>&1 && exit 0
-          if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates bash
-          elif command -v apk >/dev/null 2>&1; then apk add --no-cache curl ca-certificates bash
-          elif command -v dnf >/dev/null 2>&1; then dnf install -y curl ca-certificates bash
-          elif command -v yum >/dev/null 2>&1; then yum install -y curl ca-certificates bash
-          elif command -v zypper >/dev/null 2>&1; then zypper -n install curl ca-certificates bash
-          elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy curl bash
-          elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm curl bash
-          fi || echo 'racecar prep: package install failed, continuing'
+    - name: Install curl/bash for action-checkout (racecar; ungated, both arms)
+      shell: sh
+      run: |
+        command -v curl >/dev/null 2>&1 && command -v bash >/dev/null 2>&1 && exit 0
+        if command -v apt-get >/dev/null 2>&1; then
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates bash
+        elif command -v apk >/dev/null 2>&1; then apk add --no-cache curl ca-certificates bash
+        elif command -v dnf >/dev/null 2>&1; then dnf install -y curl ca-certificates bash
+        elif command -v yum >/dev/null 2>&1; then yum install -y curl ca-certificates bash
+        elif command -v zypper >/dev/null 2>&1; then zypper -n install curl ca-certificates bash
+        elif command -v xbps-install >/dev/null 2>&1; then xbps-install -Sy curl bash
+        elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm curl bash
+        fi || echo 'racecar prep: package install failed, continuing'
 
-      - name: Checkout code
-        uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-      - name: Assert instrumentation is live
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: Checkout code
+      uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659   # v1
 
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+    - name: Cache Cargo artifacts
+      uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16   # v2
 
-      - name: Cache Cargo artifacts
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+    - name: Build native library
+      shell: bash
+      run: cargo build -p goose-sdk --features uniffi --release
 
-      - name: Build native library
-        shell: bash
-        run: cargo build -p goose-sdk --features uniffi --release
+    - name: Stage native library
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux) lib="target/release/libgoose_sdk.so" ;;
+          macOS) lib="target/release/libgoose_sdk.dylib" ;;
+          Windows) lib="target/release/goose_sdk.dll" ;;
+          *) echo "unsupported runner OS: ${{ runner.os }}" >&2; exit 1 ;;
+        esac
+        mkdir -p "maven-native/${{ matrix.resource-prefix }}"
+        cp "$lib" "maven-native/${{ matrix.resource-prefix }}/"
 
-      - name: Stage native library
-        shell: bash
-        run: |
-          case "${{ runner.os }}" in
-            Linux) lib="target/release/libgoose_sdk.so" ;;
-            macOS) lib="target/release/libgoose_sdk.dylib" ;;
-            Windows) lib="target/release/goose_sdk.dll" ;;
-            *) echo "unsupported runner OS: ${{ runner.os }}" >&2; exit 1 ;;
+    - name: Upload native library artifact
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7
+      with:
+        name: goose-sdk-native-${{ matrix.name }}
+        path: maven-native/**
+        if-no-files-found: error
+
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
           esac
-          mkdir -p "maven-native/${{ matrix.resource-prefix }}"
-          cp "$lib" "maven-native/${{ matrix.resource-prefix }}/"
+        done
 
-      - name: Upload native library artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: goose-sdk-native-${{ matrix.name }}
-          path: maven-native/**
-          if-no-files-found: error
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
 
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   package:
     name: Package Maven artifact
     needs: build-native
@@ -125,132 +196,274 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
-      - name: Checkout code
-        uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-      - name: Assert instrumentation is live
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: Checkout code
+      uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659   # v1
 
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+    - name: Set up Java
+      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c   # v6.0.0
+      with:
+        distribution: temurin
+        java-version: "17"
 
-      - name: Set up Java
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-        with:
-          distribution: temurin
-          java-version: "17"
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb   # v6.3.0
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+    - name: Download native library artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8
+      with:
+        pattern: goose-sdk-native-*
+        path: native-artifacts
+        merge-multiple: true
 
-      - name: Download native library artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: goose-sdk-native-*
-          path: native-artifacts
-          merge-multiple: true
+    - name: Generate Kotlin bindings
+      shell: bash
+      run: |
+        cargo build -p goose-sdk --features uniffi --release
+        crates/goose-sdk/scripts/prepare-maven-package.sh \
+          target/release/libgoose_sdk.so \
+          linux-x86-64
 
-      - name: Generate Kotlin bindings
-        shell: bash
-        run: |
-          cargo build -p goose-sdk --features uniffi --release
-          crates/goose-sdk/scripts/prepare-maven-package.sh \
-            target/release/libgoose_sdk.so \
-            linux-x86-64
+    - name: Restore downloaded native libraries
+      shell: bash
+      run: cp -R native-artifacts/* crates/goose-sdk/maven/src/main/resources/
 
-      - name: Restore downloaded native libraries
-        shell: bash
-        run: cp -R native-artifacts/* crates/goose-sdk/maven/src/main/resources/
+    - name: Build Maven publication
+      working-directory: crates/goose-sdk/maven
+      run: gradle --no-daemon publishToMavenLocal
 
-      - name: Build Maven publication
-        working-directory: crates/goose-sdk/maven
-        run: gradle --no-daemon publishToMavenLocal
+    - name: Resolve Maven version
+      id: version
+      shell: bash
+      run: |
+        version=$(grep -m1 '^version =' crates/goose-sdk/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
+        echo "value=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve Maven version
-        id: version
-        shell: bash
-        run: |
-          version=$(grep -m1 '^version =' crates/goose-sdk/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
-          echo "value=$version" >> "$GITHUB_OUTPUT"
+    - name: Stage Maven local artifacts
+      shell: bash
+      env:
+        VERSION: ${{ steps.version.outputs.value }}
+      run: |
+        mkdir -p maven-artifacts
+        cp -R "$HOME/.m2/repository/io/github/aaif-goose/gdk/$VERSION" maven-artifacts/
 
-      - name: Stage Maven local artifacts
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          mkdir -p maven-artifacts
-          cp -R "$HOME/.m2/repository/io/github/aaif-goose/gdk/$VERSION" maven-artifacts/
+    - name: Upload Maven artifact bundle
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7
+      with:
+        name: goose-sdk-maven
+        path: maven-artifacts/**
+        if-no-files-found: error
 
-      - name: Upload Maven artifact bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: goose-sdk-maven
-          path: maven-artifacts/**
-          if-no-files-found: error
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   smoke-test-linux-aarch64:
     name: Smoke test Kotlin GDK (linux-aarch64)
     needs: package
     if: inputs.smoke-test
     runs-on: ubuntu-22.04-arm
     steps:
-      - name: Checkout code
-        uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-      - name: Assert instrumentation is live
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: Checkout code
+      uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Set up Java
+      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c   # v6.0.0
+      with:
+        distribution: temurin
+        java-version: "17"
 
-      - name: Set up Java
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-        with:
-          distribution: temurin
-          java-version: "17"
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb   # v6.3.0
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+    - name: Download Maven artifact bundle
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8
+      with:
+        name: goose-sdk-maven
+        path: maven-artifacts
 
-      - name: Download Maven artifact bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: goose-sdk-maven
-          path: maven-artifacts
+    - name: Install Maven artifact bundle into local repository
+      shell: bash
+      run: |
+        version=$(grep -m1 '^version =' crates/goose-sdk/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
+        target="$HOME/.m2/repository/io/github/aaif-goose/gdk/$version"
+        mkdir -p "$target"
+        find maven-artifacts -type f -exec cp -t "$target" {} +
 
-      - name: Install Maven artifact bundle into local repository
-        shell: bash
-        run: |
-          version=$(grep -m1 '^version =' crates/goose-sdk/Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
-          target="$HOME/.m2/repository/io/github/aaif-goose/gdk/$version"
-          mkdir -p "$target"
-          find maven-artifacts -type f -exec cp -t "$target" {} +
+    - name: Load native library in an ARM64 JVM
+      shell: bash
+      working-directory: crates/goose-sdk/examples/uniffi/kotlin
+      run: |
+        gradle --no-daemon installDist
+        cat > "$RUNNER_TEMP/LoadNativeLibrary.java" <<'JAVA'
+        public class LoadNativeLibrary {
+            public static void main(String[] args) {
+                System.out.println(io.github.aaif_goose.GooseKt.openaiDefaultModel());
+            }
+        }
+        JAVA
+        java -cp "$(find build/install -name '*.jar' | paste -sd: -)" "$RUNNER_TEMP/LoadNativeLibrary.java"
 
-      - name: Load native library in an ARM64 JVM
-        shell: bash
-        working-directory: crates/goose-sdk/examples/uniffi/kotlin
-        run: |
-          gradle --no-daemon installDist
-          cat > "$RUNNER_TEMP/LoadNativeLibrary.java" <<'JAVA'
-          public class LoadNativeLibrary {
-              public static void main(String[] args) {
-                  System.out.println(io.github.aaif_goose.GooseKt.openaiDefaultModel());
-              }
-          }
-          JAVA
-          java -cp "$(find build/install -name '*.jar' | paste -sd: -)" "$RUNNER_TEMP/LoadNativeLibrary.java"
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   publish:
     name: Publish to Maven Central
     needs: [package, smoke-test-linux-aarch64]
@@ -261,55 +474,126 @@ jobs:
       group: gdk-maven-release-${{ needs.package.outputs.version }}
       cancel-in-progress: false
     steps:
-      - name: Checkout code
-        uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-      - name: Assert instrumentation is live
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: Checkout code
+      uses: crashappsec/action-checkout@e9ff46a65f6403d9d88b87d248c3dfa41550ec75
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Set up Rust
+      uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659   # v1
 
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+    - name: Set up Java
+      uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c   # v6.0.0
+      with:
+        distribution: temurin
+        java-version: "17"
 
-      - name: Set up Java
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
-        with:
-          distribution: temurin
-          java-version: "17"
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb   # v6.3.0
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+    - name: Download native library artifacts
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8
+      with:
+        pattern: goose-sdk-native-*
+        path: native-artifacts
+        merge-multiple: true
 
-      - name: Download native library artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: goose-sdk-native-*
-          path: native-artifacts
-          merge-multiple: true
+    - name: Generate Kotlin bindings
+      shell: bash
+      run: |
+        cargo build -p goose-sdk --features uniffi --release
+        crates/goose-sdk/scripts/prepare-maven-package.sh \
+          target/release/libgoose_sdk.so \
+          linux-x86-64
 
-      - name: Generate Kotlin bindings
-        shell: bash
-        run: |
-          cargo build -p goose-sdk --features uniffi --release
-          crates/goose-sdk/scripts/prepare-maven-package.sh \
-            target/release/libgoose_sdk.so \
-            linux-x86-64
+    - name: Restore downloaded native libraries
+      shell: bash
+      run: cp -R native-artifacts/* crates/goose-sdk/maven/src/main/resources/
 
-      - name: Restore downloaded native libraries
-        shell: bash
-        run: cp -R native-artifacts/* crates/goose-sdk/maven/src/main/resources/
+    - name: Publish to Maven Central
+      working-directory: crates/goose-sdk/maven
+      env:
+        ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_TOKEN_USERNAME }}
+        ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_TOKEN_PASSWORD }}
+        ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+        ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+      run: gradle --no-daemon publishAndReleaseToMavenCentral
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
-      - name: Publish to Maven Central
-        working-directory: crates/goose-sdk/maven
-        env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_TOKEN_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_TOKEN_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
-        run: gradle --no-daemon publishAndReleaseToMavenCentral
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"

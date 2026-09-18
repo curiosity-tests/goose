@@ -21,42 +21,6 @@ on:
 name: "Reusable workflow to build CLI"
 
 jobs:
-  build-cli-macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
-    uses: ./.github/workflows/bundle-macos.yml
-    permissions:
-      contents: read
-    with:
-      version: ${{ inputs.version }}
-      ref: ${{ inputs.ref }}
-      target: ${{ matrix.target }}
-      signing: false
-      package_cli: true
-      package_desktop: false
-
-  build-cli-windows:
-    strategy:
-      fail-fast: false
-      matrix:
-        windows_variant:
-          - standard
-          - cuda
-    uses: ./.github/workflows/bundle-windows.yml
-    permissions:
-      contents: read
-    with:
-      version: ${{ inputs.version }}
-      ref: ${{ inputs.ref }}
-      signing: false
-      package_cli: true
-      package_desktop: false
-      windows_variant: ${{ matrix.windows_variant }}
-
   build-cli-linux:
     uses: ./.github/workflows/build-cli-linux.yml
     permissions:
