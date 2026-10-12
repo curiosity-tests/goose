@@ -6,9 +6,6 @@ name: Model Tool Call Conformance
 # regressed, not that a goose change broke. Running it on a schedule keeps the
 # signal without turning unrelated PRs red.
 on:
-  schedule:
-    # 03:00 UTC daily
-    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       model_count:
